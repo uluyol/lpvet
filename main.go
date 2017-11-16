@@ -89,6 +89,30 @@ func (p Pos) String() string {
 	return p.File + ":" + strconv.Itoa(int(p.Line))
 }
 
+const (
+	MaxLineLen           = 510
+	MaxVarLen            = 255
+	MaxConstraintNameLen = MaxVarLen
+)
+
+func validVarName(n string) bool {
+	// implement
+	for _, c := range n {
+		switch {
+		case 'a' <= c && c <= 'z':
+		case 'A' <= c && c <= 'Z':
+		case '0' <= c && c <= '9':
+		default:
+			switch c {
+			case '!', '"', '#', '$', '%', '&', '(', ')', ',', '.', ';', '?', '@', '_', '‘', '\'', '{', '}', '~':
+			default:
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func loadLP(p string) (*LP, error) {
 	f, err := os.Open(p)
 	if err != nil {
@@ -98,12 +122,15 @@ func loadLP(p string) (*LP, error) {
 
 	var (
 		lp     LP
-		lineno int32
 		curSec *Section
 	)
+	pos := Pos{File: p}
 	s := bufio.NewScanner(f)
 	for s.Scan() {
-		lineno++
+		pos.Line++
+		if len(s.Text()) > MaxLineLen {
+			return nil, fmt.Errorf("%s: line too long (%d > %d)", pos, len(s.Text()), MaxLineLen)
+		}
 		t := strings.TrimSpace(s.Text())
 		fields := strings.Fields(t)
 		var h string
@@ -156,19 +183,25 @@ func loadLP(p string) (*LP, error) {
 			return false
 		})
 		if curSec == nil {
-			return nil, fmt.Errorf("%s: not in a section", Pos{File: p, Line: lineno})
+			return nil, fmt.Errorf("%s: not in a section", pos)
 		}
 		// Remaining fields are either symbols or numerals.
 		// Assume if starts with letter or _, symbol.
 		for _, f := range fields {
-			// Not unicode safe. CPLEX probably isn't either.
+			// Not unicode safe. CPLEX isn't either.
 			if unicode.IsLetter(rune(f[0])) || f[0] == '_' {
 				if f == "inf" && curSec == &lp.Bounds {
 					continue
 				}
+				if len(f) > MaxVarLen {
+					return nil, fmt.Errorf("%s: variable too long: %q (%d > %d)", pos, f, len(f), MaxVarLen)
+				}
+				if !validVarName(f) {
+					return nil, fmt.Errorf("%s: invalid variable name: %q", pos, f)
+				}
 				curSec.AddSym(Symbol{
 					Value: f,
-					Pos:   Pos{File: p, Line: lineno},
+					Pos:   pos,
 				})
 			}
 		}
