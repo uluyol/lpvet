@@ -52,6 +52,7 @@ type LP struct {
 	GeneralVars  Section
 	BinaryVars   Section
 	SemiContVars Section
+	CustomContVars Section
 }
 
 type Section struct {
@@ -132,7 +133,7 @@ func loadLP(p string) (*LP, error) {
 			return nil, fmt.Errorf("%s: line too long (%d > %d)", pos, len(s.Text()), MaxLineLen)
 		}
 		t := strings.TrimSpace(s.Text())
-		fields := strings.Fields(t)
+		fields := strings.Fields(strings.TrimPrefix(t, "\\lpvet:"))
 		var h string
 		if len(fields) >= 1 {
 			h = strings.ToUpper(fields[0])
@@ -140,7 +141,7 @@ func loadLP(p string) (*LP, error) {
 		switch {
 		case t == "":
 			continue
-		case strings.HasPrefix(t, "\\"):
+		case strings.HasPrefix(t, "\\") && !strings.HasPrefix(t, "\\lpvet:"):
 			continue
 		default:
 			switch h {
@@ -161,6 +162,9 @@ func loadLP(p string) (*LP, error) {
 				continue
 			case "SEMI-CONTINUOUS", "SEMI", "SEMIS":
 				curSec = &lp.SemiContVars
+				continue
+			case "CONTINUOUS":
+				curSec = &lp.CustomContVars
 				continue
 			case "END":
 				curSec = nil
@@ -227,20 +231,36 @@ func vet(p string, issueWarnings bool) (error, bool) {
 		}
 	}
 
+	haveDecl := func(sym Symbol) bool {
+		if lp.GeneralVars.HasSym(sym) {
+			return true
+		}
+		if lp.BinaryVars.HasSym(sym) {
+			return true
+		}
+		if lp.SemiContVars.HasSym(sym) {
+			return true
+		}
+		if lp.CustomContVars.HasSym(sym) {
+			return true
+		}
+		return false
+	}
+
 	for _, sym := range lp.Objective.Syms() {
-		if !lp.GeneralVars.HasSym(sym) && !lp.BinaryVars.HasSym(sym) && !lp.SemiContVars.HasSym(sym) {
+		if !haveDecl(sym) {
 			issue("%s: error: no var declaration for %s", sym)
 		}
 	}
 
 	for _, sym := range lp.Constraints.Syms() {
-		if !lp.GeneralVars.HasSym(sym) && !lp.BinaryVars.HasSym(sym) && !lp.SemiContVars.HasSym(sym) {
+		if !haveDecl(sym) {
 			issue("%s: error: no var declaration for %s", sym)
 		}
 	}
 
 	for _, sym := range lp.Bounds.Syms() {
-		if !lp.GeneralVars.HasSym(sym) && !lp.BinaryVars.HasSym(sym) && !lp.SemiContVars.HasSym(sym) {
+		if !haveDecl(sym) {
 			issue("%s: error: no var declaration for %s", sym)
 		}
 	}
@@ -261,6 +281,12 @@ func vet(p string, issueWarnings bool) (error, bool) {
 		for _, sym := range lp.SemiContVars.Syms() {
 			if !lp.Objective.HasSym(sym) && !lp.Constraints.HasSym(sym) {
 				issue("%s: warning: no use of semi-continuous var %s", sym)
+			}
+		}
+
+		for _, sym := range lp.CustomContVars.Syms() {
+			if !lp.Objective.HasSym(sym) && !lp.Constraints.HasSym(sym) {
+				issue("%s: warning: no use of continuous var %s", sym)
 			}
 		}
 	}
